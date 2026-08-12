@@ -1119,22 +1119,34 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 }
 
 /* --------------------------------------------------------------------------
-   Modal
+   Modal — OUTER SCROLL + STICKY HEAD/FOOT
+   The whole modal container scrolls naturally (best touch behavior on Android).
+   Head + foot use position:sticky to stay glued to top/bottom of viewport
+   while the middle content scrolls. This eliminates the nested-flex-scroll
+   issue where Android WebView refuses to pan the inner container.
    -------------------------------------------------------------------------- */
 .modal {
   position: fixed; inset: 0;
   z-index: 1000;
-  display: flex; align-items: center; justify-content: center;
-  padding: 20px 12px;
-  padding-top: max(20px, env(safe-area-inset-top));
-  padding-bottom: max(20px, env(safe-area-inset-bottom));
-  animation: fadeIn var(--dur-2) var(--ease-out);
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  display: flex; flex-direction: column;
+  align-items: center;
+  padding: 16px 12px;
+  padding-top: max(16px, env(safe-area-inset-top));
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
 }
 .modal.hidden { display: none; }
 .modal-scrim {
-  position: absolute; inset: 0;
+  position: fixed;                    /* Fixed — stays put while modal-body scrolls */
+  inset: 0;
   background: rgba(6, 78, 59, .5);
   backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: fadeIn var(--dur-2) var(--ease-out);
 }
 .modal-body {
   position: relative;
@@ -1142,21 +1154,25 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
   border-radius: var(--r-xl);
   max-width: 500px;
   width: 100%;
-  max-height: 100%;                  /* 100% of padded flex container = viewport - paddings */
-  display: flex; flex-direction: column;
+  margin: auto 0;                     /* Vertically center when content fits */
   box-shadow: var(--shadow-xl);
-  overflow: hidden;
-  animation: scaleInBounce var(--dur-3) var(--ease-spring);
+  animation: fadeIn var(--dur-2) var(--ease-out);
+  flex-shrink: 0;                     /* Don't shrink in flex container */
+  overflow: visible;                  /* CRITICAL — sticky children need this */
 }
 .modal-body.wide { max-width: 720px; }
 .modal-body.full { max-width: 95vw; }
 .modal-head {
-  flex-shrink: 0;                    /* NEVER shrink header */
+  position: sticky;
+  top: 0;                             /* Sticks to top of scroll viewport */
+  z-index: 3;
   padding: 16px 20px;
   border-bottom: 1px solid var(--line-2);
+  background: var(--panel-2);
+  border-top-left-radius: var(--r-xl);
+  border-top-right-radius: var(--r-xl);
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px;
-  background: var(--panel-2);
 }
 .modal-title {
   font-size: 16px;
@@ -1164,6 +1180,7 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
   color: var(--e800);
   letter-spacing: -.01em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1 1 auto; min-width: 0;
 }
 .modal-close {
   width: 34px; height: 34px;
@@ -1183,20 +1200,19 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
   transform: rotate(90deg);
 }
 .modal-content {
-  padding: 18px 20px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  flex: 1 1 auto;
-  min-height: 0;                     /* CRITICAL — allows flex child to actually scroll */
-  -webkit-overflow-scrolling: touch;
+  padding: 18px 20px;                 /* Just padding — no flex, no scroll */
 }
 .modal-foot {
-  flex-shrink: 0;                    /* NEVER shrink footer — save button MUST stay visible */
+  position: sticky;
+  bottom: 0;                          /* Sticks to bottom of scroll viewport */
+  z-index: 3;
   padding: 12px 16px;
   padding-bottom: max(12px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--line-2);
-  display: flex; align-items: center; gap: 8px;
   background: var(--panel-2);
+  border-bottom-left-radius: var(--r-xl);
+  border-bottom-right-radius: var(--r-xl);
+  display: flex; align-items: center; gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -1221,12 +1237,15 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
   border-radius: var(--r-xl) var(--r-xl) 0 0;
   width: 100%;
   max-width: var(--max-w);
-  max-height: 85%;                          /* 85% of parent flex container */
+  max-height: 85vh;
+  max-height: 85dvh;
   padding: 20px 20px 24px;
   padding-bottom: max(24px, calc(env(safe-area-inset-bottom) + 12px));
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
   animation: slideInBottom var(--dur-3) var(--ease-out);
   box-shadow: 0 -20px 40px rgba(6, 78, 59, .15);
 }
@@ -1319,60 +1338,164 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 }
 
 /* --------------------------------------------------------------------------
-   Calendar
+   Calendar (redesigned)
    -------------------------------------------------------------------------- */
-.cal-grid {
+.cal-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 16px;
+  animation: fadeInUp var(--dur-3) var(--ease-out);
+}
+.cal-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px;
+  gap: 8px;
+}
+.cal-nav {
+  width: 40px; height: 40px;
+  border: 1.5px solid var(--line);
+  background: var(--panel);
+  color: var(--e700);
+  border-radius: 50%;
+  font-size: 20px;
+  font-weight: 700;
+  cursor: pointer;
+  display: grid; place-items: center;
+  transition: all var(--dur-2) var(--ease-spring);
+}
+.cal-nav:hover {
+  background: var(--grad-primary);
+  color: #fff;
+  border-color: transparent;
+  transform: scale(1.08);
+}
+.cal-nav:active { transform: scale(.94); }
+.cal-month {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--e800);
+  letter-spacing: -.01em;
+  text-align: center;
+  flex: 1;
+}
+.cal-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  padding: 10px;
+  background: var(--e50);
+  border-radius: var(--r);
+  margin-bottom: 14px;
+}
+.cal-sum-item { text-align: center; }
+.cal-sum-lbl {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-bottom: 2px;
+}
+.cal-sum-val {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--e800);
+}
+.cal-sum-val.ok    { color: var(--ok); }
+.cal-sum-val.danger{ color: var(--danger); }
+.cal-grid-new {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 4px;
-  animation: fadeIn var(--dur-3) var(--ease-out);
 }
-.cal-head {
-  padding: 8px 4px;
+.cal-head-new {
+  padding: 6px 0;
   text-align: center;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: .05em;
+  letter-spacing: .04em;
 }
-.cal-cell {
+.cal-head-new.weekend { color: var(--danger); }
+.cal-cell-new {
   aspect-ratio: 1;
-  border-radius: var(--r-sm);
-  padding: 6px 4px;
+  border-radius: 10px;
   cursor: pointer;
   display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 2px;
   border: 1.5px solid transparent;
-  transition: all var(--dur-2) var(--ease-out);
-  background: var(--panel-2);
+  background: transparent;
+  transition: all var(--dur-1) var(--ease-out);
   position: relative;
+  min-height: 42px;
 }
-.cal-cell:hover {
-  border-color: var(--e300);
+.cal-cell-new:hover {
   background: var(--e50);
-  transform: scale(1.05);
+  border-color: var(--e200);
+  transform: scale(1.06);
   z-index: 2;
 }
-.cal-cell.other { opacity: .35; }
-.cal-cell.today {
+.cal-cell-new.other { opacity: .28; }
+.cal-cell-new.weekend .cal-num-new { color: var(--danger); opacity: .75; }
+.cal-cell-new.today {
   background: var(--grad-primary);
-  color: #fff;
   border-color: var(--e700);
-  box-shadow: 0 4px 12px rgba(6, 78, 59, .3);
-  animation: pulse 2s ease-in-out infinite;
+  box-shadow: 0 4px 14px rgba(6, 78, 59, .28);
 }
-.cal-cell.today .cal-num { color: #fff; }
-.cal-num {
-  font-size: 13px;
+.cal-cell-new.today .cal-num-new,
+.cal-cell-new.today .cal-cnt { color: #fff; }
+.cal-num-new {
+  font-size: 15px;
   font-weight: 700;
   color: var(--ink);
+  line-height: 1;
 }
-.cal-dot {
+.cal-cnt {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.85);
+  color: var(--e800);
+  border: 1px solid currentColor;
+}
+.cal-cell-new.has-upcoming { background: rgba(16,185,129,.08); border-color: rgba(16,185,129,.25); }
+.cal-cell-new.has-upcoming .cal-cnt { color: var(--primary); background: #fff; border-color: var(--e200); }
+.cal-cell-new.has-grace    { background: rgba(245,158,11,.08); border-color: rgba(245,158,11,.3); }
+.cal-cell-new.has-grace    .cal-cnt { color: var(--grace); background: #fff; border-color: rgba(245,158,11,.35); }
+.cal-cell-new.has-late     { background: rgba(239,68,68,.09); border-color: rgba(239,68,68,.3); }
+.cal-cell-new.has-late     .cal-cnt { color: var(--late); background: #fff; border-color: rgba(239,68,68,.35); }
+.cal-cell-new.has-done     { background: rgba(2,132,199,.06); border-color: rgba(2,132,199,.2); }
+.cal-cell-new.has-done     .cal-cnt { color: var(--done); background: #fff; border-color: rgba(2,132,199,.25); }
+.cal-cell-new.today.has-upcoming,
+.cal-cell-new.today.has-grace,
+.cal-cell-new.today.has-late,
+.cal-cell-new.today.has-done { border-color: var(--e700); background: var(--grad-primary); }
+.cal-legend {
+  display: flex; justify-content: center; gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.cal-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.cal-legend .dot {
   display: inline-block;
-  width: 6px; height: 6px;
+  width: 8px; height: 8px;
   border-radius: 50%;
-  margin-inline-end: 2px;
 }
+.cal-toolbar-bottom {
+  display: flex; justify-content: center;
+  margin-top: 12px;
+}
+/* Legacy classes kept as thin fallback */
+.cal-grid, .cal-head, .cal-cell, .cal-num, .cal-dot { /* deprecated — use cal-*-new */ }
 
 /* --------------------------------------------------------------------------
    Reports

@@ -338,6 +338,7 @@ const V = {
 
   clientDetail(id){
     const c = DB.client(id); if (!c) return V.clients();
+    if (window.App) App.parentRoute = 'clients';
     const loans = DB.clientLoans(id);
     const totalRem = loans.reduce((s,l)=>s+(Engine.loanMetrics(l.id)?.remaining||0), 0);
     const totalPrincipal = loans.reduce((s,l)=>s+l.principalAmount,0);
@@ -667,6 +668,7 @@ const V = {
 
   loanDetail(id){
     const l = DB.loan(id); if (!l) return V.loans();
+    if (window.App) App.parentRoute = 'loans';
     const c = DB.client(l.clientId) || {name:'—'};
     const m = Engine.loanMetrics(id);
     const st = Engine.loanStatus(id);
@@ -1074,7 +1076,6 @@ const V = {
       const m = cursor.getMonth();
       const firstDow = new Date(y,m,1).getDay(); // Sun=0
       const daysInMonth = new Date(y,m+1,0).getDate();
-      // Build calendar cells (start from Saturday for Arabic week convention... actually Sun=0 is fine, let's just use it)
       const cells = [];
       const start = 6; // Saturday first (Arabic convention)
       const off = (firstDow - start + 7) % 7;
@@ -1087,51 +1088,86 @@ const V = {
         const dd = Utils.fromYmd(i.dueDate);
         return dd && dd.getFullYear()===y && dd.getMonth()===m;
       });
+      // Month aggregates
+      const monthDue = monthInsts.reduce((s,i)=>s+i.amount, 0);
+      const monthPaid = monthInsts.reduce((s,i)=>s+(i.paidAmount||0), 0);
+      const monthLate = monthInsts.filter(i=>!i.paid && Engine.installmentStatus(i, DB.loan(i.loanId))==='late').length;
+      const monthUpcoming = monthInsts.filter(i=>!i.paid).length;
+
       view.innerHTML = `
         <div class="view-head">
-          <div class="view-title">🗓️ التقويم — ${Utils.fmtDate(cursor,'month')}</div>
-          <div class="view-actions">
-            <button class="btn-ghost small" id="prev">‹</button>
-            <button class="btn-secondary small" id="todayBtn">اليوم</button>
-            <button class="btn-ghost small" id="next">›</button>
-          </div>
+          <div class="view-title">🗓️ التقويم</div>
         </div>
-        <div class="card"><div class="card-body">
-          <div class="cal-grid">
-            ${['السبت','الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة'].map(h=>`<div class="cal-head">${h}</div>`).join('')}
-            ${cells.map(c=>{
+        <div class="cal-card">
+          <div class="cal-toolbar">
+            <button class="cal-nav" id="prev" aria-label="السابق">‹</button>
+            <div class="cal-month">${Utils.fmtDate(cursor,'month')}</div>
+            <button class="cal-nav" id="next" aria-label="التالي">›</button>
+          </div>
+          <div class="cal-summary">
+            <div class="cal-sum-item">
+              <div class="cal-sum-lbl">مستحق</div>
+              <div class="cal-sum-val"><span class="money">${Utils.moneyOnly(monthDue)}</span></div>
+            </div>
+            <div class="cal-sum-item">
+              <div class="cal-sum-lbl">مدفوع</div>
+              <div class="cal-sum-val ok"><span class="money">${Utils.moneyOnly(monthPaid)}</span></div>
+            </div>
+            <div class="cal-sum-item">
+              <div class="cal-sum-lbl">متأخر</div>
+              <div class="cal-sum-val ${monthLate>0?'danger':''}">${monthLate}</div>
+            </div>
+            <div class="cal-sum-item">
+              <div class="cal-sum-lbl">أقساط</div>
+              <div class="cal-sum-val">${monthInsts.length}</div>
+            </div>
+          </div>
+          <div class="cal-grid-new">
+            ${['س','ح','ن','ث','ر','خ','ج'].map((h,i)=>`<div class="cal-head-new ${i===6?'weekend':''}">${h}</div>`).join('')}
+            ${cells.map((c,idx)=>{
               const cd = new Date(c.ym.getFullYear(), c.ym.getMonth(), c.d);
-              const isToday = cd.getTime()===today.getTime();
-              const dayInsts = monthInsts.filter(i => !c.other && Utils.fromYmd(i.dueDate).getDate()===c.d);
-              const late = dayInsts.some(i=>!i.paid && Engine.installmentStatus(i, DB.loan(i.loanId))==='late');
-              const grace = dayInsts.some(i=>!i.paid && Engine.installmentStatus(i, DB.loan(i.loanId))==='grace');
-              const upcoming = dayInsts.some(i=>!i.paid);
-              const paid = dayInsts.every(i=>i.paid);
-              return `<div class="cal-cell ${c.other?'other':''} ${isToday?'today':''}" data-date="${Utils.ymd(cd)}">
-                <div class="cal-num">${c.d}</div>
-                ${dayInsts.length ? `<div style="margin-top:2px">
-                  ${late?'<span class="cal-dot" style="background:var(--late)"></span>':''}
-                  ${grace?'<span class="cal-dot" style="background:var(--grace)"></span>':''}
-                  ${upcoming && !late && !grace && !paid?'<span class="cal-dot" style="background:var(--primary)"></span>':''}
-                  ${paid?'<span class="cal-dot" style="background:var(--done)"></span>':''}
-                  <div class="small" style="font-size:10px">${dayInsts.length}</div>
-                </div>`:''}
+              const isToday = !c.other && cd.getTime()===today.getTime();
+              const dow = idx % 7;
+              const isWeekend = dow === 6; // Friday column
+              const dayInsts = c.other ? [] : monthInsts.filter(i => Utils.fromYmd(i.dueDate).getDate()===c.d);
+              let statusClass = '';
+              if (dayInsts.length){
+                const anyLate = dayInsts.some(i=>!i.paid && Engine.installmentStatus(i, DB.loan(i.loanId))==='late');
+                const anyGrace = dayInsts.some(i=>!i.paid && Engine.installmentStatus(i, DB.loan(i.loanId))==='grace');
+                const allPaid = dayInsts.every(i=>i.paid);
+                if (anyLate) statusClass = 'has-late';
+                else if (anyGrace) statusClass = 'has-grace';
+                else if (allPaid) statusClass = 'has-done';
+                else statusClass = 'has-upcoming';
+              }
+              return `<div class="cal-cell-new ${c.other?'other':''} ${isToday?'today':''} ${isWeekend?'weekend':''} ${statusClass}" data-date="${Utils.ymd(cd)}">
+                <div class="cal-num-new">${c.d}</div>
+                ${dayInsts.length ? `<div class="cal-cnt">${dayInsts.length}</div>` : ''}
               </div>`;
             }).join('')}
           </div>
-        </div></div>
+          <div class="cal-legend">
+            <span><span class="dot" style="background:var(--primary)"></span>مستحقة</span>
+            <span><span class="dot" style="background:var(--grace)"></span>سماحية</span>
+            <span><span class="dot" style="background:var(--late)"></span>متأخر</span>
+            <span><span class="dot" style="background:var(--done)"></span>مدفوع</span>
+          </div>
+        </div>
+        <div class="cal-toolbar-bottom">
+          <button class="btn-secondary small" id="todayBtn">📍 اليوم</button>
+        </div>
         <div id="dayList" style="margin-top:12px"></div>
       `;
       $('#prev').onclick = () => { cursor.setMonth(cursor.getMonth()-1); render(); };
       $('#next').onclick = () => { cursor.setMonth(cursor.getMonth()+1); render(); };
-      $('#todayBtn').onclick = () => { cursor = new Date(); cursor.setDate(1); render(); };
-      $$('.cal-cell').forEach(el => el.onclick = () => showDay(el.dataset.date));
+      $('#todayBtn').onclick = () => { cursor = new Date(); cursor.setDate(1); render(); setTimeout(()=>showDay(Utils.ymd(new Date())), 100); };
+      $$('.cal-cell-new').forEach(el => el.onclick = () => showDay(el.dataset.date));
     };
     const showDay = ymd => {
       const items = DB.installments().filter(i=>i.dueDate===ymd);
       $('#dayList').innerHTML = items.length ? `
         <div class="card">
-          <div class="card-head"><div class="card-title">${Utils.fmtDate(ymd)}</div></div>
+          <div class="card-head"><div class="card-title">📅 ${Utils.fmtDate(ymd)}</div><span class="muted small">${items.length} قسط</span></div>
           <div class="card-body pad-0">
             ${items.map(i=>{
               const loan = DB.loan(i.loanId); const c = DB.client(loan.clientId)||{};
@@ -1144,8 +1180,10 @@ const V = {
             }).join('')}
           </div>
         </div>
-      ` : `<div class="empty small"><p>لا توجد أقساط في هذا اليوم</p></div>`;
+      ` : `<div class="empty small"><div class="icon">📅</div><p>لا توجد أقساط في هذا اليوم</p></div>`;
       $$('#dayList .inst-row').forEach(r=>r.onclick=()=>V.installmentActions(r.dataset.i));
+      // Scroll to the day list
+      setTimeout(() => $('#dayList')?.scrollIntoView({behavior:'smooth', block:'start'}), 100);
     };
     render();
   },
@@ -1563,10 +1601,9 @@ const V = {
       };
     };
 
-    $('#expAll').onclick = () => {
-      const blob = new Blob([DB.exportAll()], {type:'application/json'});
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-      a.download = `fahd-tamimi-backup-${Utils.ymd(new Date())}.json`; a.click();
+    $('#expAll').onclick = async () => {
+      const filename = `fahd-tamimi-backup-${Utils.ymd(new Date())}.json`;
+      await Utils.saveFile(DB.exportAll(), filename, 'application/json');
     };
     $('#impAll').onclick = async () => {
       const file = await Utils.pickFile('.json');

@@ -275,23 +275,130 @@ const Utils = {
     window.open(`https://wa.me/${clean}${text?'?text='+encodeURIComponent(text):''}`,'_blank');
   },
 
+  /* ---------- Universal file save (works on Capacitor Android + web) ---------- */
+  isNative(){
+    return !!(window.Capacitor && (window.Capacitor.isNativePlatform?.() || (window.Capacitor.getPlatform && window.Capacitor.getPlatform() !== 'web')));
+  },
+  _blobToBase64(blob){
+    return new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result).split(',')[1]);
+      r.onerror = rej;
+      r.readAsDataURL(blob);
+    });
+  },
+  _bufToBase64(buf){
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    const chunk = 0x8000;
+    for (let i=0; i<bytes.length; i+=chunk){
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i+chunk));
+    }
+    return btoa(bin);
+  },
+  _strToBase64(s){
+    return btoa(unescape(encodeURIComponent(s)));
+  },
+  /**
+   * saveFile(data, filename, mime) — saves data to Documents on Android/iOS,
+   * or triggers a browser download on web. On native, after saving it also
+   * opens the system Share sheet so the user can send it via WhatsApp/Mail/etc.
+   * data can be: Blob, ArrayBuffer, Uint8Array, or a UTF-8 string.
+   */
+  async saveFile(data, filename, mime='application/octet-stream'){
+    // Native path — Capacitor Filesystem + Share
+    if (Utils.isNative() && window.Capacitor?.Plugins?.Filesystem){
+      const FS = window.Capacitor.Plugins.Filesystem;
+      const Share = window.Capacitor.Plugins.Share;
+      try {
+        // Convert everything to base64
+        let base64;
+        if (data instanceof Blob) base64 = await Utils._blobToBase64(data);
+        else if (data instanceof ArrayBuffer) base64 = Utils._bufToBase64(data);
+        else if (data instanceof Uint8Array) base64 = Utils._bufToBase64(data.buffer);
+        else base64 = Utils._strToBase64(String(data));
+
+        // Sanitize filename — Arabic + safe chars only
+        const safeName = String(filename).replace(/[\\\/:*?"<>|]/g, '_');
+
+        // Save under Documents so it shows in the Files app
+        const res = await FS.writeFile({
+          path: safeName,
+          data: base64,
+          directory: 'DOCUMENTS',
+          recursive: true,
+        });
+        const uri = res && res.uri;
+        Utils.toast(`تم الحفظ في مستنداتك: ${safeName}`, 'ok', 3200);
+
+        // Auto-open Share sheet so the user can send it
+        if (Share && uri){
+          setTimeout(async () => {
+            try {
+              await Share.share({
+                title: safeName,
+                url: uri,
+                dialogTitle: 'مشاركة الملف',
+              });
+            } catch(shareErr){ /* user cancelled */ }
+          }, 400);
+        }
+        return uri;
+      } catch (e){
+        console.error('saveFile native failed', e);
+        Utils.toast('تعذر الحفظ: ' + (e.message || e), 'err', 4000);
+        return null;
+      }
+    }
+
+    // Web fallback — blob download
+    try {
+      let blob;
+      if (data instanceof Blob) blob = data;
+      else if (data instanceof ArrayBuffer) blob = new Blob([data], {type: mime});
+      else if (data instanceof Uint8Array) blob = new Blob([data], {type: mime});
+      else blob = new Blob([data], {type: mime});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
+      return url;
+    } catch(e){
+      console.error('saveFile web failed', e);
+      Utils.toast('تعذر الحفظ: ' + (e.message || e), 'err', 4000);
+      return null;
+    }
+  },
+
   /* ---------- Excel/CSV ---------- */
   async exportExcel(rows, sheetName='Sheet1', filename='export.xlsx'){
-    await Vendor.need('xlsx');
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(rows);
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    XLSX.writeFile(wb, filename);
+    try {
+      if (!rows || !rows.length){ Utils.toast('لا توجد بيانات للتصدير','err'); return; }
+      await Vendor.need('xlsx');
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      // Write to array buffer instead of using XLSX.writeFile (which uses <a download>)
+      const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      await Utils.saveFile(buf, filename, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    } catch(e){
+      console.error(e);
+      Utils.toast('تعذر تصدير Excel — تحقق من الإنترنت لتحميل المكتبة','err', 4000);
+    }
   },
-  exportCSV(rows, filename='export.csv'){
-    if(!rows.length){ Utils.toast('لا توجد بيانات للتصدير','err'); return; }
-    const keys = Object.keys(rows[0]);
-    const esc = v => { const s = String(v==null?'':v); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; };
-    const csv = '\uFEFF' + [keys.join(','), ...rows.map(r=>keys.map(k=>esc(r[k])).join(','))].join('\n');
-    const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = filename; a.click();
-    setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+  async exportCSV(rows, filename='export.csv'){
+    try {
+      if(!rows.length){ Utils.toast('لا توجد بيانات للتصدير','err'); return; }
+      const keys = Object.keys(rows[0]);
+      const esc = v => { const s = String(v==null?'':v); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; };
+      const csv = '\uFEFF' + [keys.join(','), ...rows.map(r=>keys.map(k=>esc(r[k])).join(','))].join('\n');
+      await Utils.saveFile(csv, filename, 'text/csv;charset=utf-8');
+    } catch(e){
+      console.error(e);
+      Utils.toast('تعذر تصدير CSV','err');
+    }
   },
   async importExcel(){
     const file = await Utils.pickFile('.xlsx,.xls,.csv');
@@ -311,45 +418,57 @@ const Utils = {
 
   /* ---------- PDF (from element) ---------- */
   async elementToPDF(el, filename='doc.pdf'){
-    await Vendor.need('html2canvas');
-    await Vendor.need('jspdf');
-    const canvas = await html2canvas(el, {scale:2, backgroundColor:'#ffffff', useCORS:true, logging:false});
-    const img = canvas.toDataURL('image/jpeg', .95);
-    const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
-    const pw = pdf.internal.pageSize.getWidth();
-    const ph = pdf.internal.pageSize.getHeight();
-    const h = canvas.height * pw / canvas.width;
-    if (h <= ph){ pdf.addImage(img,'JPEG',0,0,pw,h); }
-    else {
-      const pageCanvas = document.createElement('canvas');
-      pageCanvas.width = canvas.width;
-      const pxPerMm = canvas.width/pw;
-      pageCanvas.height = Math.floor(ph*pxPerMm);
-      const ctx = pageCanvas.getContext('2d');
-      let sy=0, remaining=canvas.height, first=true;
-      while (remaining>0){
-        const slice = Math.min(pageCanvas.height, remaining);
-        ctx.fillStyle='#fff'; ctx.fillRect(0,0,pageCanvas.width,pageCanvas.height);
-        ctx.drawImage(canvas, 0, sy, canvas.width, slice, 0, 0, canvas.width, slice);
-        if(!first) pdf.addPage();
-        pdf.addImage(pageCanvas.toDataURL('image/jpeg',.95),'JPEG',0,0,pw, slice/pxPerMm);
-        sy += slice; remaining -= slice; first=false;
+    try {
+      Utils.toast('جاري إنشاء PDF...','',1500);
+      await Vendor.need('html2canvas');
+      await Vendor.need('jspdf');
+      // Give the vendor scripts a tick to attach to window
+      await new Promise(r => setTimeout(r, 100));
+      const canvas = await html2canvas(el, {scale:2, backgroundColor:'#ffffff', useCORS:true, logging:false});
+      const img = canvas.toDataURL('image/jpeg', .92);
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
+      const pw = pdf.internal.pageSize.getWidth();
+      const ph = pdf.internal.pageSize.getHeight();
+      const h = canvas.height * pw / canvas.width;
+      if (h <= ph){ pdf.addImage(img,'JPEG',0,0,pw,h); }
+      else {
+        const pageCanvas = document.createElement('canvas');
+        pageCanvas.width = canvas.width;
+        const pxPerMm = canvas.width/pw;
+        pageCanvas.height = Math.floor(ph*pxPerMm);
+        const ctx = pageCanvas.getContext('2d');
+        let sy=0, remaining=canvas.height, first=true;
+        while (remaining>0){
+          const slice = Math.min(pageCanvas.height, remaining);
+          ctx.fillStyle='#fff'; ctx.fillRect(0,0,pageCanvas.width,pageCanvas.height);
+          ctx.drawImage(canvas, 0, sy, canvas.width, slice, 0, 0, canvas.width, slice);
+          if(!first) pdf.addPage();
+          pdf.addImage(pageCanvas.toDataURL('image/jpeg',.92),'JPEG',0,0,pw, slice/pxPerMm);
+          sy += slice; remaining -= slice; first=false;
+        }
       }
+      // Output as ArrayBuffer instead of pdf.save() (which uses <a download>)
+      const buf = pdf.output('arraybuffer');
+      await Utils.saveFile(buf, filename, 'application/pdf');
+    } catch(e){
+      console.error(e);
+      Utils.toast('تعذر إنشاء PDF: ' + (e.message || e), 'err', 4000);
     }
-    pdf.save(filename);
   },
   async elementToShare(el, filename='doc.png'){
-    await Vendor.need('html2canvas');
-    const canvas = await html2canvas(el, {scale:2, backgroundColor:'#ffffff'});
-    canvas.toBlob(async blob => {
-      const file = new File([blob], filename, {type:'image/png'});
-      if (navigator.canShare && navigator.canShare({files:[file]})){
-        try { await navigator.share({files:[file], title:filename}); } catch(e){}
-      } else {
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click();
-      }
-    }, 'image/png');
+    try {
+      Utils.toast('جاري إنشاء الصورة...','',1500);
+      await Vendor.need('html2canvas');
+      await new Promise(r => setTimeout(r, 100));
+      const canvas = await html2canvas(el, {scale:2, backgroundColor:'#ffffff'});
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+      if (!blob){ throw new Error('empty image'); }
+      await Utils.saveFile(blob, filename, 'image/png');
+    } catch(e){
+      console.error(e);
+      Utils.toast('تعذر إنشاء الصورة: ' + (e.message || e),'err',4000);
+    }
   },
 };
 window.Utils = Utils; window.$ = $; window.$$ = $$;

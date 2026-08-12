@@ -1,6 +1,9 @@
 /* ===== App Boot ===== */
 const App = {
   currentRoute: 'dashboard',
+  parentRoute: null,       // Set by detail views so back returns to their list
+  viewStack: [],           // Stack of main routes visited (for back navigation)
+  lastBackTime: 0,         // For "press again to exit"
 
   routes: {
     dashboard: () => V.dashboard(),
@@ -16,13 +19,65 @@ const App = {
 
   go(route){
     if (!this.routes[route]) return;
+    // Track history for back button (don't push if same route)
+    if (this.currentRoute !== route){
+      this.viewStack.push(this.currentRoute);
+      // Cap stack length
+      if (this.viewStack.length > 20) this.viewStack.shift();
+    }
     this.currentRoute = route;
+    this.parentRoute = null;   // Clear detail parent on main nav
     $$('#drawer .drawer-nav li').forEach(el => el.classList.toggle('active', el.dataset.route===route));
     this.closeDrawer();
     $('#view').scrollTop = 0;
     window.scrollTo(0,0);
     this.routes[route]();
     this.updateReminderBell();
+  },
+
+  /* ---------- Back-button handler ---------- */
+  goBack(){
+    // 1. Close open modal
+    if (!$('#modal').classList.contains('hidden')){
+      Utils.closeModal();
+      return true;
+    }
+    // 2. Close open sheet
+    if (!$('#sheet').classList.contains('hidden')){
+      Utils.closeSheet();
+      return true;
+    }
+    // 3. Close open drawer
+    if ($('#drawer').classList.contains('open')){
+      this.closeDrawer();
+      return true;
+    }
+    // 4. If in a detail view (client detail / loan detail), return to its list
+    if (this.parentRoute){
+      const p = this.parentRoute;
+      this.parentRoute = null;
+      this.go(p);
+      return true;
+    }
+    // 5. Pop from view stack
+    if (this.viewStack.length > 0){
+      const prev = this.viewStack.pop();
+      this.currentRoute = prev;
+      $$('#drawer .drawer-nav li').forEach(el => el.classList.toggle('active', el.dataset.route===prev));
+      this.routes[prev]();
+      return true;
+    }
+    // 6. At root — double-press to exit
+    const now = Date.now();
+    if (now - this.lastBackTime < 2000){
+      // Second press within 2s — exit app
+      const CapApp = window.Capacitor?.Plugins?.App;
+      if (CapApp && CapApp.exitApp) CapApp.exitApp();
+      return false;
+    }
+    this.lastBackTime = now;
+    Utils.toast('اضغط رجوع مرة أخرى للخروج','',2000);
+    return true;
   },
 
   openDrawer(){ $('#drawer').classList.add('open'); $('#drawerScrim').classList.add('on'); },
@@ -100,6 +155,26 @@ const App = {
     });
   },
 
+  /* ---------- Back button setup ---------- */
+  setupBackButton(){
+    const CapApp = window.Capacitor?.Plugins?.App;
+    // On Capacitor native, use the App plugin exclusively (avoids double-fire)
+    if (CapApp && CapApp.addListener && Utils.isNative && Utils.isNative()){
+      CapApp.addListener('backButton', () => {
+        try { App.goBack(); } catch(e){ console.warn(e); }
+      });
+      return;
+    }
+    // Browser fallback — trap history so back triggers popstate instead of leaving the page
+    try {
+      history.pushState({trap:true}, '');
+      window.addEventListener('popstate', () => {
+        history.pushState({trap:true}, '');   // Re-trap immediately
+        try { App.goBack(); } catch(e){ console.warn(e); }
+      });
+    } catch(e){ /* history API blocked */ }
+  },
+
   async boot(){
     DB.load();
 
@@ -116,6 +191,9 @@ const App = {
       if (!DB.settings().passwordHash){ Utils.toast('لم يتم ضبط كلمة مرور — اذهب للإعدادات','err'); return; }
       this.showLock('login');
     };
+
+    // Set up back-button handler (works on native Capacitor + browser)
+    this.setupBackButton();
 
     // Show lock + boot
     setTimeout(async () => {
