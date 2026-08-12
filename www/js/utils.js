@@ -21,6 +21,7 @@ const Utils = {
   ymd(d){ if(!d) return ''; const x=(d instanceof Date)?d:new Date(d); if(isNaN(x)) return ''; const y=x.getFullYear(),m=String(x.getMonth()+1).padStart(2,'0'),dd=String(x.getDate()).padStart(2,'0'); return `${y}-${m}-${dd}`; },
   fromYmd(s){ if(!s) return null; const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); },
   addMonths(d, n){ const x=new Date(d); const day=x.getDate(); x.setDate(1); x.setMonth(x.getMonth()+n); const last=new Date(x.getFullYear(),x.getMonth()+1,0).getDate(); x.setDate(Math.min(day,last)); return x; },
+  addDays(d, n){ const x=new Date(d); x.setDate(x.getDate()+Number(n||0)); return x; },
   diffDays(a,b){ const A=new Date(a); A.setHours(0,0,0,0); const B=new Date(b); B.setHours(0,0,0,0); return Math.round((A-B)/86400000); },
   fmtDate(d, style='full'){
     if(!d) return '—';

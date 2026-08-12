@@ -574,12 +574,26 @@ const V = {
           </div>
           <div class="form-row two">
             <div>
+              <div class="form-lbl">نظام السداد</div>
+              <select id="intervalMode">
+                <option value="days"  ${(l.installmentIntervalMode||s.installmentIntervalMode||'days')==='days'?'selected':''}>كل عدد أيام (٣٠ يوم افتراضياً)</option>
+                <option value="month" ${(l.installmentIntervalMode||s.installmentIntervalMode||'days')==='month'?'selected':''}>نفس اليوم من كل شهر</option>
+              </select>
+              <div class="form-hint">"كل ٣٠ يوم" = يضيف ٣٠ يوم فعلي بغض النظر عن طول الشهر</div>
+            </div>
+            <div id="intervalDaysWrap" class="${(l.installmentIntervalMode||s.installmentIntervalMode||'days')==='month'?'hidden':''}">
+              <div class="form-lbl">الفترة بين الأقساط (يوم)</div>
+              <input id="intervalDays" type="number" min="1" max="365" value="${l.installmentIntervalDays!=null?l.installmentIntervalDays:(s.installmentIntervalDays||30)}">
+            </div>
+          </div>
+          <div class="form-row two">
+            <div>
               <div class="form-lbl">تاريخ العقد</div>
               <input id="startDate" type="date" value="${l.startDate||Utils.ymd(new Date())}">
             </div>
             <div>
               <div class="form-lbl">تاريخ أول قسط</div>
-              <input id="firstInstallmentDate" type="date" value="${l.firstInstallmentDate||Utils.ymd(Utils.addMonths(new Date(),1))}">
+              <input id="firstInstallmentDate" type="date" value="${l.firstInstallmentDate||Utils.ymd(Utils.addDays(new Date(),30))}">
             </div>
           </div>
           <div class="form-row">
@@ -609,6 +623,9 @@ const V = {
     $('#contractType').onchange = e => {
       $('#customTypeWrap').classList.toggle('hidden', e.target.value!=='أخرى');
     };
+    $('#intervalMode').onchange = e => {
+      $('#intervalDaysWrap').classList.toggle('hidden', e.target.value!=='days');
+    };
     recalc();
 
     $$('.modal [data-close]').forEach(b=>b.onclick=()=>Utils.closeModal());
@@ -626,6 +643,8 @@ const V = {
         profitAmount: Utils.toNum($('#profitAmount').value),
         installmentCount: Utils.toNum($('#installmentCount').value)||1,
         graceDays: Utils.toNum($('#graceDays').value),
+        installmentIntervalMode: $('#intervalMode').value,
+        installmentIntervalDays: Utils.toNum($('#intervalDays').value) || 30,
         startDate: $('#startDate').value,
         firstInstallmentDate: $('#firstInstallmentDate').value,
         notes: $('#notes').value.trim(),
@@ -643,7 +662,9 @@ const V = {
         const needRegen = payload.principalAmount!==l.principalAmount ||
                           payload.profitAmount!==l.profitAmount ||
                           payload.installmentCount!==l.installmentCount ||
-                          payload.firstInstallmentDate!==l.firstInstallmentDate;
+                          payload.firstInstallmentDate!==l.firstInstallmentDate ||
+                          payload.installmentIntervalMode!==l.installmentIntervalMode ||
+                          payload.installmentIntervalDays!==l.installmentIntervalDays;
         DB.updateLoan(l.id, payload);
         if (needRegen){
           const hasPayments = DB.loanPayments(l.id).length;
@@ -767,6 +788,7 @@ const V = {
             <div class="rpt-row"><span class="lbl">قيمة الربح</span><span class="val"><span class="money">${Utils.money(l.profitAmount)}</span></span></div>
             <div class="rpt-row"><span class="lbl">القسط الشهري</span><span class="val"><span class="money">${Utils.money(l.monthlyInstallment)}</span></span></div>
             <div class="rpt-row"><span class="lbl">عدد الأقساط</span><span class="val">${l.installmentCount}</span></div>
+            <div class="rpt-row"><span class="lbl">نظام السداد</span><span class="val">${(l.installmentIntervalMode||'days')==='days'?`كل ${l.installmentIntervalDays||30} يوم`:'نفس اليوم من كل شهر'}</span></div>
             <div class="rpt-row"><span class="lbl">فترة السماحية</span><span class="val">${l.graceDays} يوم</span></div>
             <div class="rpt-row"><span class="lbl">تاريخ العقد</span><span class="val">${Utils.fmtDate(l.startDate,'short')}</span></div>
             <div class="rpt-row"><span class="lbl">أول قسط</span><span class="val">${Utils.fmtDate(l.firstInstallmentDate,'short')}</span></div>
@@ -1437,6 +1459,16 @@ const V = {
             <div><div class="form-lbl">فترة السماحية (يوم)</div><input id="setGrace" type="number" value="${s.graceDays}"></div>
             <div><div class="form-lbl">تذكير قبل الاستحقاق (يوم)</div><input id="setRemind" type="number" value="${s.remindDaysBefore}"></div>
           </div>
+          <div class="form-row two">
+            <div>
+              <div class="form-lbl">نظام السداد الافتراضي</div>
+              <select id="setIntMode">
+                <option value="days"  ${(s.installmentIntervalMode||'days')==='days'?'selected':''}>كل عدد أيام (فعلي)</option>
+                <option value="month" ${(s.installmentIntervalMode||'days')==='month'?'selected':''}>نفس اليوم من كل شهر</option>
+              </select>
+            </div>
+            <div><div class="form-lbl">الفترة الافتراضية (يوم)</div><input id="setIntDays" type="number" min="1" max="365" value="${s.installmentIntervalDays||30}"></div>
+          </div>
           <div class="form-row"><div class="form-lbl">تذييل الفاتورة</div><input id="setFooter" value="${Utils.esc(s.invoiceFooter)}"></div>
         </div>
       </div>
@@ -1481,7 +1513,11 @@ const V = {
     bindSave('#setRepAddress','repAddress',v=>v.trim());
     bindSave('#setGrace','graceDays',v=>Utils.toNum(v));
     bindSave('#setRemind','remindDaysBefore',v=>Utils.toNum(v));
+    bindSave('#setIntMode','installmentIntervalMode',v=>v);
+    bindSave('#setIntDays','installmentIntervalDays',v=>Math.max(1, Utils.toNum(v)||30));
     bindSave('#setFooter','invoiceFooter',v=>v);
+    // 'change' fires when a <select> option is chosen (bindSave uses onblur which needs a blur event)
+    $('#setIntMode').onchange = e => { DB.updateSettings({installmentIntervalMode: e.target.value}); Utils.toast('تم الحفظ','ok',900); };
 
     // Contract types
     const renderTypes = () => {

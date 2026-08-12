@@ -9,14 +9,22 @@
 
 const Engine = {
 
-  /* ---------- Schedule Generation ---------- */
+  /* ---------- Schedule Generation ----------
+     Two modes controlled by loan.installmentIntervalMode:
+       'days'  → adds a fixed number of ACTUAL days between installments
+                 (default 30). Due date shifts naturally with 28/30/31-day months.
+       'month' → keeps the same day-of-month as the first installment (legacy).
+     Default mode is 'days' with intervalDays = 30.
+  */
   generateSchedule(loan){
     const insts = [];
     const first = Utils.fromYmd(loan.firstInstallmentDate) || Utils.fromYmd(loan.startDate) || new Date();
     const total = Utils.round2(loan.totalAmount);
     const n = Number(loan.installmentCount);
     const perInst = Utils.round2(total / n);
-    // Distribute rounding remainder to last installment
+    const mode = loan.installmentIntervalMode || 'days';
+    const intervalDays = Number(loan.installmentIntervalDays) || 30;
+
     let running = 0;
     for (let i=1; i<=n; i++){
       let amt = perInst;
@@ -24,19 +32,25 @@ const Engine = {
         amt = Utils.round2(total - running);
       }
       running = Utils.round2(running + amt);
-      const dueDate = Utils.ymd(Utils.addMonths(first, i-1));
+      // Due date calculation
+      let due;
+      if (mode === 'month'){
+        due = Utils.addMonths(first, i-1);
+      } else {
+        due = Utils.addDays(first, (i-1) * intervalDays);
+      }
       insts.push({
         id: Utils.uid('ins'),
         loanId: loan.id,
         number: i,
-        dueDate,
+        dueDate: Utils.ymd(due),
         amount: amt,
         paidAmount: 0,
         paid: false,
         partial: false,
         paidDate: null,
-        fromRepAccount: false, // set when rep pays from his own
-        repPaidAmount: 0,      // portion covered by rep, still owed by client
+        fromRepAccount: false,
+        repPaidAmount: 0,
         notes: '',
       });
     }

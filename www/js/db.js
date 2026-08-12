@@ -29,7 +29,9 @@ const DB = {
       lastClientNumber: 1000,      // permanent counter — never reset
       lastContractNumber: 0,       // per loan
       lastInvoiceNumber: 0,
-      defaultInstallmentDay: 1,    // day of month for first installment
+      defaultInstallmentDay: 1,    // (legacy) day of month for first installment
+      installmentIntervalMode: 'days',  // 'days' | 'month'
+      installmentIntervalDays: 30,      // used when mode = 'days'
       defaultProfitRate: 0,        // percentage
       remindDaysBefore: 3,
       invoiceFooter: 'شكراً لتعاملكم معنا',
@@ -128,6 +130,8 @@ const DB = {
       startDate: l.startDate,
       firstInstallmentDate: l.firstInstallmentDate || l.startDate,
       graceDays: l.graceDays != null ? Number(l.graceDays) : this.data.settings.graceDays,
+      installmentIntervalMode: l.installmentIntervalMode || this.data.settings.installmentIntervalMode || 'days',
+      installmentIntervalDays: l.installmentIntervalDays != null ? Number(l.installmentIntervalDays) : (this.data.settings.installmentIntervalDays || 30),
       status: 'active', // active | completed | defaulted
       notes: l.notes || '',
       createdAt: new Date().toISOString(),
